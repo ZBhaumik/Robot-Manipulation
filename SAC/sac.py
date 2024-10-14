@@ -22,7 +22,7 @@ class SoftActorCritic:
 
         self.alpha = 0.2
         self.log_alpha = torch.tensor(np.log(self.alpha), requires_grad=True).to(self.device)
-        self.alpha_optimizer = optim.Adam([self.log_alpha], lr=3e-4)
+        self.alpha_optimizer = optim.Adam([self.log_alpha], lr=1e-3)
 
         self.target_entropy = -action_dim
         self.gamma = 0.99
@@ -30,21 +30,20 @@ class SoftActorCritic:
     
     def sample_action(self, state):
         state = torch.FloatTensor(state).to(self.device).unsqueeze(0)
-        action, _ = self.policy.sample(state)
+        action, _ = self.policy.forward(state)
         return action.detach().cpu().numpy()[0]
     
     def train(self, replay_buffer, batch_size=256):
         state, action, reward, next_state, done = replay_buffer.sample(batch_size)
 
-
         # Updating q-networks
         with torch.no_grad():
-            next_action, next_log_prob = self.policy.sample(next_state)
+            next_action, next_log_prob = self.policy.forward(next_state)
             target_q1 = self.q1_t(next_state, next_action)
             target_q2 = self.q1_t(next_state, next_action)
-            target_q = torch.min(target_q1, target_q2) - self.alpha * next_log_prob
-            target_q = reward + (1 - done) * self.gamma * target_q
-
+            target_q_m = torch.min(target_q1, target_q2) - self.alpha * next_log_prob
+            target_q = reward.unsqueeze(1) + (1 - done.unsqueeze(1)) * self.gamma * target_q_m
+        
         current_q1 = self.q1(state, action)
         current_q2 = self.q2(state, action)
         critic1_loss = F.mse_loss(current_q1, target_q)
@@ -58,10 +57,8 @@ class SoftActorCritic:
         critic2_loss.backward()
         self.q2_optimizer.step()
 
-
-
         # Updating policy
-        action, log_prob = self.policy.sample(state)
+        action, log_prob = self.policy.forward(state)
         q1 = self.q1(state, action)
         q2 = self.q2(state, action)
         actor_loss = (self.alpha * log_prob - torch.min(q1, q2)).mean()
