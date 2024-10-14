@@ -21,8 +21,6 @@ class SoftActorCritic:
         self.q2_optimizer = optim.Adam(self.q1.parameters(), lr=3e-4)
 
         self.alpha = 0.2
-        self.log_alpha = torch.tensor(np.log(self.alpha), requires_grad=True).to(self.device)
-        self.alpha_optimizer = optim.Adam([self.log_alpha], lr=1e-3)
 
         self.target_entropy = -action_dim
         self.gamma = 0.99
@@ -46,15 +44,17 @@ class SoftActorCritic:
         
         current_q1 = self.q1(state, action)
         current_q2 = self.q2(state, action)
-        critic1_loss = F.mse_loss(current_q1, target_q)
-        critic2_loss = F.mse_loss(current_q2, target_q)
+        critic1_loss = F.mse_loss(current_q1, target_q.float())
+        critic2_loss = F.mse_loss(current_q2, target_q.float())
 
         self.q1_optimizer.zero_grad()
         critic1_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.q1.parameters(), max_norm=1.0)
         self.q1_optimizer.step()
 
         self.q2_optimizer.zero_grad()
         critic2_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.q2.parameters(), max_norm=1.0)
         self.q2_optimizer.step()
 
         # Updating policy
@@ -65,16 +65,8 @@ class SoftActorCritic:
 
         self.policy_optim.zero_grad()
         actor_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=1.0)
         self.policy_optim.step()
-
-        # Update temperature/alpha
-        alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
-
-        self.alpha_optimizer.zero_grad()
-        alpha_loss.backward()
-        self.alpha_optimizer.step()
-
-        self.alpha = self.log_alpha.exp().item()
 
         # Update parameters of the target q network.
         for target_param, param in zip(self.q1_t.parameters(), self.q1.parameters()):
